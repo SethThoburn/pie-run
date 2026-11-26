@@ -14,6 +14,7 @@
   const BIKE_R = 3.5;        // collision radius
   const BEST_KEY = 'pierun.best.v1';
   const SOUND_KEY = 'pierun.sound.v1';
+  const NAME_KEY = 'pierun.name.v1';
 
   // ---- Persistent storage (may be unavailable in private/sandboxed browsers) -----------
   const store = {
@@ -132,10 +133,11 @@
   document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
   window.addEventListener('keydown', (e) => {
+    if (Scoreboard.isOpen()) return; // typing a name
     const k = e.key;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(k)) e.preventDefault();
     audio.init();
-    if (!e.repeat && (k === ' ' || k === 'Enter')) handleTap(-1, -1);
+    if (!e.repeat && (k === ' ' || k === 'Enter')) handleTap(-1, -1, true);
     input.keys.add(k.toLowerCase());
   });
   window.addEventListener('keyup', (e) => input.keys.delete(e.key.toLowerCase()));
@@ -180,11 +182,15 @@
     newBest: false,
     pieSplit: 0,
     toast: '', toastT: 0,
+    posted: null,     // scoreboard result for the last run, once posted
   };
+  let board = null;   // scoreboard overlay: { loading, error, top, name, rank, best }
   const bike = { x: 0, y: 0, a: 0, speed: 0, bumpT: 0 };
   const cam = { x: 0, y: 0, lx: 0, ly: 0, shake: 0 };
   const particles = [];
-  window.__pierun = { game, bike, get world() { return world; } }; // for automated testing
+  window.__pierun = { game, bike, get world() { return world; }, get board() { return board; }, get buttons() { return buttons; }, toCss: (x, y) => { const r = canvas.getBoundingClientRect(); return [r.left + (x / VW) * r.width, r.top + (y / VH) * r.height]; }, finishRace: () => finishRace(),
+    // Advance the game by n fixed 1/60 s frames (tests can't rely on rAF in headless Chrome).
+    step: (n = 1) => { for (let i = 0; i < n; i++) { if (world) update(1 / 60); render(1 / 60); } } }; // for automated testing
 
   function resetRace() {
     bike.x = world.start.x; bike.y = world.start.y; bike.a = world.start.a;
@@ -194,6 +200,7 @@
     game.raceTime = 0;
     game.phase = 'pie';
     game.newBest = false;
+    game.posted = null;
     game.toast = ''; game.toastT = 0;
     particles.length = 0;
   }
@@ -215,25 +222,64 @@
     try { const p = el.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ }
   }
 
-  // Title/finish screen taps. Returns true if the tap was consumed.
-  let soundBtn = null;
-  function handleTap(nx, ny) {
+  // ---- Menus, buttons and the scoreboard ----------------------------------------------------
+  // Buttons are registered while drawing each frame and hit-tested on tap.
+  let buttons = [];
+  function button(label, cx, y, opts, action) {
+    const scale = opts.scale || 1;
+    const w = opts.w || measureText(label, scale) + 12;
+    const h = 7 * scale + 8;
+    const x = Math.round(cx - w / 2);
+    ctx.fillStyle = DARK; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = opts.color || '#4a3d5c'; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(x, y, w, 1);
+    drawText(ctx, label, cx, y + 4, { scale, color: WHITE, align: 'center' });
+    buttons.push({ label, x: x - 2, y: y - 2, w: w + 4, h: h + 4, action });
+    return h;
+  }
+
+  function openBoard(result) {
+    const name = store.get(NAME_KEY);
+    if (result) {
+      board = { loading: false, error: null, top: result.top, name: result.name, rank: result.rank, best: result.best };
+      return;
+    }
+    board = { loading: true, error: null, top: null, name, rank: null, best: null };
+    const mine = board;
+    Scoreboard.fetchTop().then((top) => {
+      mine.top = top; mine.loading = false;
+      const me = top.find((e) => e.name === name);
+      if (me) { mine.rank = me.rank; mine.best = me.ms; }
+    }).catch((e) => { mine.error = e.message; mine.loading = false; });
+  }
+
+  function postScore() {
+    input.pointerId = null;
+    Scoreboard.askAndPost(game.lastTime, fmtTime(game.lastTime), store.get(NAME_KEY) || '', (name) => store.set(NAME_KEY, name))
+      .then((result) => {
+        if (!result) return;
+        game.posted = result;
+        audio.tune([659, 784, 1047]);
+        openBoard(result);
+      });
+  }
+
+  // Taps on menus. Returns true if the tap was consumed (so it does not start steering).
+  function handleTap(nx, ny, fromKey) {
+    if (Scoreboard.isOpen()) return true;
+    if (board) { board = null; return true; }
+    const hit = buttons.find((b) => nx >= b.x && nx <= b.x + b.w && ny >= b.y && ny <= b.y + b.h);
+    if (hit && (game.state === 'title' || game.state === 'finish')) { hit.action(); return true; }
     if (game.state === 'title') {
-      if (soundBtn && nx >= soundBtn.x && nx <= soundBtn.x + soundBtn.w && ny >= soundBtn.y && ny <= soundBtn.y + soundBtn.h) {
-        audio.on = !audio.on;
-        store.set(SOUND_KEY, audio.on ? 'on' : 'off');
-        if (audio.on) audio.beep(660, 0.1);
-        return true;
-      }
       requestFullscreen();
       startCountdown();
       return false; // let the same touch become the steering stick
     }
-    if (game.state === 'finish' && game.t > 1.0) {
-      startCountdown();
-      return false;
+    if (game.state === 'finish') {
+      if (fromKey && game.t > 1.0) startCountdown();
+      return true;
     }
-    return game.state === 'finish';
+    return false;
   }
 
   // ---- Simulation ----------------------------------------------------------------------------------
@@ -555,7 +601,7 @@
     dim(0.45);
     const cx = VW / 2;
     const w = Math.min(VW - 12, 220);
-    const [, py] = panel(cx, VH / 2, w, 190);
+    const [, py] = panel(cx, VH / 2, w, 214);
     let y = py + 10;
     const tw = measureText('PIE RUN', 3);
     ctx.drawImage(ART.pie, Math.round(cx - tw / 2 - 15), y + 7);
@@ -572,12 +618,13 @@
     if (Math.floor(game.t * 2.5) % 2 === 0) drawText(ctx, 'TAP TO START', cx, y, { scale: 2, color: WHITE, outline: DARK, align: 'center' });
     y += 24;
     drawText(ctx, 'DRAG ANYWHERE TO STEER', cx, y, { color: '#c8c0d8', align: 'center' });
-    y += 18;
-    const label = audio.on ? 'SOUND: ON' : 'SOUND: OFF';
-    const bw = measureText(label) + 8;
-    soundBtn = { x: Math.round(cx - bw / 2), y: y - 3, w: bw, h: 13 };
-    ctx.fillStyle = '#4a3d5c'; ctx.fillRect(soundBtn.x, soundBtn.y, soundBtn.w, soundBtn.h);
-    drawText(ctx, label, cx, y, { color: WHITE, align: 'center' });
+    y += 16;
+    button('SCOREBOARD', cx - 46, y, { w: 84, color: '#2f6f9e' }, () => openBoard());
+    button(audio.on ? 'SOUND: ON' : 'SOUND: OFF', cx + 46, y, { w: 84 }, () => {
+      audio.on = !audio.on;
+      store.set(SOUND_KEY, audio.on ? 'on' : 'off');
+      if (audio.on) audio.beep(660, 0.1);
+    });
     drawText(ctx, 'MAP DATA (C) OPENSTREETMAP', cx, VH - 10, { color: '#e0e0e0', outline: DARK, align: 'center' });
   }
 
@@ -587,7 +634,7 @@
     if (game.t < 0.3) return;
     const cx = VW / 2;
     const w = Math.min(VW - 12, 210);
-    const [, py] = panel(cx, VH / 2, w, 150);
+    const [, py] = panel(cx, VH / 2, w, 196);
     let y = py + 10;
     ctx.drawImage(ART.pie, Math.round(cx - 4), y);
     y += 12;
@@ -605,7 +652,59 @@
     y += 22;
     drawText(ctx, 'PIE PICKUP ' + fmtTime(Math.round(game.pieSplit * 1000)), cx, y, { color: '#c8c0d8', align: 'center' });
     y += 16;
-    if (game.t > 1.0 && Math.floor(game.t * 2.5) % 2 === 0) drawText(ctx, 'TAP TO RACE AGAIN', cx, y, { color: WHITE, align: 'center' });
+    if (game.t < 1.0) return; // brief pause so a stray tap can't hit a button
+    if (game.posted) {
+      drawText(ctx, 'POSTED! RANK #' + game.posted.rank, cx, y, { color: '#60ff80', align: 'center' });
+      y += 12;
+      y += button('SCOREBOARD', cx, y, { w: 150, color: '#2f6f9e' }, () => openBoard()) + 6;
+    } else if (game.newBest) {
+      y += button('POST TO SCOREBOARD?', cx, y, { w: 150, color: '#2f8f4e' }, postScore) + 6;
+    } else {
+      y += button('SCOREBOARD', cx, y, { w: 150, color: '#2f6f9e' }, () => openBoard()) + 6;
+    }
+    button('RACE AGAIN', cx, y, { w: 150 }, startCountdown);
+  }
+
+  function drawBoard() {
+    dim(0.5);
+    const cx = VW / 2;
+    const w = Math.min(VW - 8, 214);
+    const h = Math.min(VH - 16, 290);
+    const [px, py] = panel(cx, VH / 2, w, h);
+    let y = py + 8;
+    drawText(ctx, 'SCOREBOARD', cx, y, { scale: 2, color: YELLOW, outline: DARK, align: 'center' });
+    y += 18;
+    drawText(ctx, 'FASTEST PIE RUNS', cx, y, { color: '#9cc8ff', align: 'center' });
+    y += 14;
+    const bottom = py + h - 16;
+    if (board.loading) {
+      drawText(ctx, 'LOADING...', cx, y + 20, { color: WHITE, align: 'center' });
+    } else if (board.error) {
+      drawText(ctx, "COULDN'T LOAD", cx, y + 14, { color: '#ff8080', align: 'center' });
+      drawText(ctx, 'THE SCOREBOARD', cx, y + 24, { color: '#ff8080', align: 'center' });
+    } else if (!board.top.length) {
+      drawText(ctx, 'NO TIMES YET.', cx, y + 14, { color: WHITE, align: 'center' });
+      drawText(ctx, 'BE THE FIRST!', cx, y + 24, { color: YELLOW, align: 'center' });
+    } else {
+      const maxRows = Math.max(1, Math.floor((bottom - y) / 11));
+      let rows = board.top.slice(0, maxRows);
+      const meShown = rows.some((e) => e.name === board.name);
+      // Always show the player's own rank, even below the visible list.
+      if (!meShown && board.rank && board.best) {
+        rows = rows.slice(0, maxRows - 1).concat([{ rank: board.rank, name: board.name, ms: board.best }]);
+      }
+      const lx = px + 8, rx = px + w - 8;
+      for (const e of rows) {
+        const mine = e.name === board.name;
+        const col = mine ? YELLOW : e.rank <= 3 ? WHITE : '#d8d0e8';
+        if (mine) { ctx.fillStyle = 'rgba(255,214,64,0.18)'; ctx.fillRect(px + 3, y - 2, w - 6, 11); }
+        drawText(ctx, e.rank + '.', lx + 18, y, { color: col, align: 'right' });
+        drawText(ctx, e.name, lx + 24, y, { color: col });
+        drawText(ctx, fmtTime(e.ms), rx, y, { color: col, align: 'right' });
+        y += 11;
+      }
+    }
+    if (Math.floor(performance.now() / 400) % 2 === 0) drawText(ctx, 'TAP TO CLOSE', cx, py + h - 12, { color: '#c8c0d8', align: 'center' });
   }
 
   function render(dt) {
@@ -616,17 +715,21 @@
       if (loadError) drawText(ctx, 'PLEASE RELOAD', VW / 2, VH / 2 + 8, { color: WHITE, align: 'center' });
       return;
     }
+    buttons = [];
     updateCamera(dt);
     const [x0, y0] = viewOrigin();
     drawWorld(x0, y0);
     drawTargetMarker(x0, y0);
     drawBike(x0, y0);
-    if (game.state === 'title') { drawTitle(); return; }
-    drawHUD();
-    drawStick();
-    if (game.state === 'countdown') drawCountdown();
-    drawGo();
-    if (game.state === 'finish') drawFinish();
+    if (game.state === 'title') drawTitle();
+    else {
+      drawHUD();
+      drawStick();
+      if (game.state === 'countdown') drawCountdown();
+      drawGo();
+      if (game.state === 'finish') drawFinish();
+    }
+    if (board) { buttons = []; drawBoard(); }
   }
 
   // ---- Main loop ------------------------------------------------------------------------------

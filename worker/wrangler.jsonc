@@ -1,0 +1,20 @@
+{
+  // Pie Run scoreboard API. Deploy: cd worker && npx wrangler deploy
+  "name": "pie-run-scores",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pie-run-scores",
+      "database_id": "56db8a26-eaa6-43e7-8a5c-75de782ea85d",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Same-origin with the game: pierun.seththoburn.com/api/* (domain is proxied by Cloudflare).
+  "routes": [
+    { "pattern": "pierun.seththoburn.com/api/*", "zone_name": "seththoburn.com" }
+  ],
+  "workers_dev": true,
+  "observability": { "enabled": true }
+}

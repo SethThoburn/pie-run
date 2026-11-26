@@ -19,6 +19,37 @@
       image-rendering: pixelated; image-rendering: crisp-edges;
       touch-action: none;
     }
+    /* Scoreboard name dialog (a real <input> so phone keyboards work). */
+    .sb-modal {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; align-items: flex-start; justify-content: center;
+      padding-top: 12vh; background: rgba(10, 8, 20, 0.6);
+      font-family: ui-monospace, Menlo, Consolas, monospace; touch-action: auto;
+    }
+    .sb-box {
+      width: min(86vw, 340px); box-sizing: border-box; padding: 18px;
+      background: #2b2236; color: #fff;
+      border: 3px solid #f2e2c4; box-shadow: 0 0 0 3px #1a1410, 6px 6px 0 3px rgba(0,0,0,0.35);
+      text-align: center;
+    }
+    .sb-title { color: #ffd640; font-weight: bold; font-size: 18px; letter-spacing: 1px; }
+    .sb-time { font-size: 30px; font-weight: bold; margin: 6px 0 14px; }
+    .sb-label { display: block; color: #c8c0d8; font-size: 13px; margin-bottom: 6px; letter-spacing: 1px; }
+    .sb-input {
+      width: 100%; box-sizing: border-box; padding: 10px; font: inherit; font-size: 22px;
+      text-align: center; text-transform: uppercase; letter-spacing: 2px;
+      color: #fff; background: #1a1410; border: 2px solid #9cc8ff; border-radius: 0; outline: none;
+      -webkit-user-select: text; user-select: text;
+    }
+    .sb-input:focus { border-color: #ffd640; }
+    .sb-err { min-height: 18px; margin: 8px 0 4px; color: #ff8080; font-size: 13px; }
+    .sb-row { display: flex; gap: 10px; }
+    .sb-btn {
+      flex: 1; padding: 12px 0; font: inherit; font-size: 16px; font-weight: bold;
+      color: #fff; background: #4a3d5c; border: 2px solid #1a1410; border-radius: 0; cursor: pointer;
+    }
+    .sb-post { background: #2f8f4e; }
+    .sb-btn:disabled { opacity: 0.6; }
   </style>
 </head>
 <body>
@@ -28,6 +59,7 @@
   <script src="src/font.js?v=476cfecc22"></script>
   <script src="src/art.js?v=7fbba11d3a"></script>
   <script src="src/world.js?v=2b94a9087a"></script>
-  <script src="src/game.js?v=72baca6fac"></script>
+  <script src="src/scoreboard.js?v=067f892673"></script>
+  <script src="src/game.js?v=3fc13e6034"></script>
 </body>
 </html>

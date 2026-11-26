@@ -4,3 +4,5 @@ tools/imagery/*.png
 public/
 node_modules/
 .DS_Store
+worker/node_modules/
+worker/.wrangler/
