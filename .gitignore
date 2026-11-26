@@ -1,0 +1,6 @@
+# Source aerial photo (14 MB); re-download with tools/imagery/fetch.sh
+tools/imagery/*.png
+# Local-only serving folder (symlinks) used for ngrok
+public/
+node_modules/
+.DS_Store
