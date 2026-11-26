@@ -183,6 +183,8 @@
     pieSplit: 0,
     toast: '', toastT: 0,
     posted: null,     // scoreboard result for the last run, once posted
+    topTen: null,     // last run would make the global top 10: true / false / null (unknown yet)
+    runId: 0,
   };
   let board = null;   // scoreboard overlay: { loading, error, top, name, rank, best }
   const bike = { x: 0, y: 0, a: 0, speed: 0, bumpT: 0 };
@@ -201,6 +203,8 @@
     game.phase = 'pie';
     game.newBest = false;
     game.posted = null;
+    game.topTen = null;
+    game.runId++;
     game.toast = ''; game.toastT = 0;
     particles.length = 0;
   }
@@ -410,6 +414,12 @@
     }
     setState('finish');
     audio.tune(game.newBest ? [523, 659, 784, 1047, 784, 1047] : [523, 659, 784, 1047]);
+    // Check whether this time would make the global top 10 (also postable if it does).
+    const run = game.runId;
+    Scoreboard.fetchTop().then((top) => {
+      if (game.runId !== run) return; // a newer race started meanwhile
+      game.topTen = top.length < 10 || ms < top[9].ms;
+    }).catch(() => { if (game.runId === run) game.topTen = false; });
   }
 
   function fmtTime(ms) {
@@ -634,7 +644,7 @@
     if (game.t < 0.3) return;
     const cx = VW / 2;
     const w = Math.min(VW - 12, 210);
-    const [, py] = panel(cx, VH / 2, w, 196);
+    const [, py] = panel(cx, VH / 2, w, 208);
     let y = py + 10;
     ctx.drawImage(ART.pie, Math.round(cx - 4), y);
     y += 12;
@@ -657,7 +667,9 @@
       drawText(ctx, 'POSTED! RANK #' + game.posted.rank, cx, y, { color: '#60ff80', align: 'center' });
       y += 12;
       y += button('SCOREBOARD', cx, y, { w: 150, color: '#2f6f9e' }, () => openBoard()) + 6;
-    } else if (game.newBest) {
+    } else if (game.newBest || game.topTen) {
+      if (!game.newBest) drawText(ctx, 'TOP 10 TIME!', cx, y, { color: '#60ff80', align: 'center' });
+      y += 12;
       y += button('POST TO SCOREBOARD?', cx, y, { w: 150, color: '#2f8f4e' }, postScore) + 6;
     } else {
       y += button('SCOREBOARD', cx, y, { w: 150, color: '#2f6f9e' }, () => openBoard()) + 6;

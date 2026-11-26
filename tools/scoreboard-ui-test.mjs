@@ -8,6 +8,10 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const shotDir = process.argv[2] || null;
 const API = 'http://127.0.0.1:8787/api/scores';
+import { execFileSync } from 'node:child_process';
+// Fresh local database (schema applied, rows cleared). Never touches the live one.
+execFileSync('npx', ['wrangler', 'd1', 'migrations', 'apply', 'pie-run-scores', '--local'], { cwd: join(root, 'worker'), stdio: 'ignore' });
+execFileSync('npx', ['wrangler', 'd1', 'execute', 'pie-run-scores', '--local', '--command', 'DELETE FROM scores'], { cwd: join(root, 'worker'), stdio: 'ignore' });
 const b = await launch();
 const shot = async (n) => { if (shotDir) await b.shot(join(shotDir, n + '.png')); };
 let failed = 0;
@@ -86,12 +90,36 @@ await b.eval("document.querySelector('.sb-cancel').click()");
 check(await waitFor("!document.querySelector('.sb-modal')"), 'cancel closes dialog');
 check(!(await b.eval('__pierun.game.posted')), 'cancel does not post');
 
-// A slower run is not a new best -> no post button.
-await tapButton('RACE AGAIN');
-await waitFor("__pierun.game.state === 'race'", 30000);
-await b.eval('__pierun.game.raceTime = 50.0; __pierun.game.phase = "home"; __pierun.finishRace()');
-await stepFor(1.2);
-check(!(await tapButton('POST TO SCOREBOARD?')), 'no post button when not a new best');
+// Finish a simulated run in `sec` seconds and wait until the top-10 check is done.
+async function finishRun(sec) {
+  await tapButton('RACE AGAIN');
+  await waitFor("__pierun.game.state === 'race'", 30000);
+  await b.eval(`__pierun.game.raceTime = ${sec}; __pierun.game.phase = "home"; __pierun.finishRace()`);
+  await waitFor('__pierun.game.topTen !== null', 8000);
+  await stepFor(1.2);
+}
+const seed = async (name, ms, ip) => (await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip }, body: JSON.stringify({ name, ms }) })).status;
+
+// Board has room (fewer than 10 names): a slower run can still be posted.
+await finishRun(50.0);
+check(!(await b.eval('__pierun.game.newBest')) && (await b.eval('__pierun.game.topTen')) === true, 'slower run, board not full -> qualifies for top 10');
+check(await tapButton('POST TO SCOREBOARD?'), 'post button shown for top-10 run that is not a personal best');
+
+// Fill the board to 10 names: 9 fast times + PIEKID (38.47) as 10th.
+let seeded = 0;
+for (let i = 0; i < 9; i++) seeded += (await seed('FAST' + i, 21000 + i * 100, '10.1.0.' + i)) === 200 ? 1 : 0;
+check(seeded === 9, 'seeded 9 fast scores');
+await b.eval("document.querySelector('.sb-cancel') && document.querySelector('.sb-cancel').click()");
+
+await finishRun(37.0); // slower than personal best (36.0) but faster than 10th place (38.47)
+check((await b.eval('__pierun.game.topTen')) === true && !(await b.eval('__pierun.game.newBest')), '37.0s beats 10th place -> top 10');
+check(await b.eval("__pierun.buttons.some(x => x.label === 'POST TO SCOREBOARD?')"), 'post button shown for top-10 time');
+await shot('sb6-top10');
+
+await finishRun(45.0); // slower than personal best and than 10th place
+check((await b.eval('__pierun.game.topTen')) === false, '45.0s does not make the top 10');
+check(!(await b.eval("__pierun.buttons.some(x => x.label === 'POST TO SCOREBOARD?')")), 'no post button when neither personal best nor top 10');
+check(await b.eval("__pierun.buttons.some(x => x.label === 'SCOREBOARD')"), 'SCOREBOARD button shown instead');
 
 const errs = b.logs.filter((l) => /EXCEPTION|error/i.test(l) && !/favicon/.test(l));
 check(errs.length === 0, 'no console errors' + (errs.length ? ':\n' + errs.join('\n') : ''));
