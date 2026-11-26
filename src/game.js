@@ -98,7 +98,7 @@
     pointerId: null, ox: 0, oy: 0, x: 0, y: 0, // CSS pixels
     keys: new Set(),
   };
-  const JOY_DEAD = 8, JOY_FULL = 44, JOY_MAX = 64; // CSS px
+  const JOY_DEAD = 8, JOY_FULL = 44; // CSS px
 
   function toNative(cx, cy) {
     const r = canvas.getBoundingClientRect();
@@ -120,14 +120,9 @@
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerId !== input.pointerId) return;
     e.preventDefault();
+    // The stick stays anchored where the finger first touched; only lifting
+    // and touching again moves it.
     input.x = e.clientX; input.y = e.clientY;
-    // Floating stick: drag the origin along if the finger strays far.
-    const dx = input.x - input.ox, dy = input.y - input.oy;
-    const d = Math.hypot(dx, dy);
-    if (d > JOY_MAX) {
-      input.ox = input.x - (dx / d) * JOY_MAX;
-      input.oy = input.y - (dy / d) * JOY_MAX;
-    }
   });
   const endPointer = (e) => { if (e.pointerId === input.pointerId) input.pointerId = null; };
   canvas.addEventListener('pointerup', endPointer);
@@ -510,7 +505,10 @@
       const a = (i / n) * Math.PI * 2;
       ctx.fillRect(Math.round(ox + Math.cos(a) * r), Math.round(oy + Math.sin(a) * r), 2, 2);
     }
-    ctx.fillRect(Math.round(px) - 3, Math.round(py) - 3, 6, 6);
+    // Knob follows the finger but stays on the anchored ring.
+    const dx = px - ox, dy = py - oy, d = Math.hypot(dx, dy);
+    const k = d > r ? r / d : 1;
+    ctx.fillRect(Math.round(ox + dx * k) - 3, Math.round(oy + dy * k) - 3, 6, 6);
     ctx.globalAlpha = 1;
   }
 
